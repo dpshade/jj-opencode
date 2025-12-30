@@ -91,6 +91,11 @@ const plugin: Plugin = async (ctx) => {
     "tool.execute.before": async (input, output) => {
       const { tool: toolName, sessionID } = input
 
+      // Our own plugin tools are never blocked - they handle their own logic
+      if (toolName.startsWith('jj_') || toolName === 'jj') {
+        return
+      }
+
       if (toolName === 'bash') {
         const command = output.args?.command || ''
         
