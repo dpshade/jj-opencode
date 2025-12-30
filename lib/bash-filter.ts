@@ -112,3 +112,18 @@ const BASH_MODIFY_PATTERNS: RegExp[] = [
 export function isModifyingBashCommand(command: string): boolean {
   return BASH_MODIFY_PATTERNS.some(pattern => pattern.test(command));
 }
+
+// Detect pushing to main via jj commands - reminds to sync repo root afterwards
+const JJ_PUSH_MAIN_PATTERNS: RegExp[] = [
+  /jj\s+bookmark\s+move\s+main\s+--to\s+@/i,
+  /jj\s+git\s+push\s+(-b|--bookmark)\s+main\b/i,
+];
+
+export interface JJPushMainCheck {
+  isPushingToMain: boolean;
+}
+
+export function checkForJJPushMain(command: string): JJPushMainCheck {
+  const isPushing = JJ_PUSH_MAIN_PATTERNS.some(pattern => pattern.test(command));
+  return { isPushingToMain: isPushing };
+}

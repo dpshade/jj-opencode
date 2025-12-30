@@ -2,7 +2,7 @@ import type { Plugin } from "@opencode-ai/plugin"
 import { tool } from "@opencode-ai/plugin"
 import { createState, getState, setState, inheritParentState, deleteState } from './lib/state.js'
 import { checkGate, isGatedTool } from './lib/gate.js'
-import { checkForGitCommand, checkForJJCommand, isModifyingBashCommand } from './lib/bash-filter.js'
+import { checkForGitCommand, checkForJJCommand, checkForJJPushMain, isModifyingBashCommand } from './lib/bash-filter.js'
 import { getParentSessionId } from './lib/subagent.js'
 import * as jj from './lib/jj.js'
 import * as messages from './lib/messages.js'
@@ -113,6 +113,11 @@ const plugin: Plugin = async (ctx) => {
             jjCheck.jjSubcommand!,
             jjCheck.pluginAlternative!
           ))
+        }
+
+        const pushMainCheck = checkForJJPushMain(command)
+        if (pushMainCheck.isPushingToMain) {
+          console.log(messages.JJ_PUSH_MAIN_WARNING)
         }
 
         if (isModifyingBashCommand(command)) {

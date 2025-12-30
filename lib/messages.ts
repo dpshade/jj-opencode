@@ -229,6 +229,8 @@ export const JJ_WORKSPACE_REDIRECT = (changeId: string, description: string, wor
 
 You may now edit files. All changes will be tracked in this workspace.
 
+**IMPORTANT**: You are now in a new directory. Re-read any files you need to edit from \`${workspacePath}/\` — your previous file reads are from the old location.
+
 When ready to push, call \`jj_push()\`.
 `
 
@@ -299,3 +301,16 @@ export const BASH_MODIFY_WARNING = (command: string): string =>
   `**Note**: Modifying files without a JJ change defined.\n\n` +
   `Consider calling \`jj("description")\` first to track your work.\n\n` +
   `Command executed anyway.`
+
+export const JJ_PUSH_MAIN_WARNING = `
+**Note**: After pushing to main, sync the repo root with the latest changes:
+
+\`\`\`bash
+jj new main@origin
+\`\`\`
+
+This updates the default workspace's working copy to include what you just pushed.
+Without this, the repo root will be out of sync until the next \`jj git fetch\`.
+
+Command executed anyway.
+`
