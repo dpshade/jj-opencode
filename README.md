@@ -53,7 +53,8 @@ node bin/setup.js
 2. **You try to edit** → BLOCKED with helpful message
 3. **You run `/jj "add feature X"`** → Gate UNLOCKS
 4. **You edit freely** → All changes tracked in JJ change
-5. **You run `/jj-push`** → Validates and pushes to remote
+5. **You run `/jj-push`** → Pushes to remote, **gate locks again**
+6. **Next task?** → Run `/jj "next task"` to unlock
 
 ## Available Commands
 
@@ -127,7 +128,9 @@ AI edits utils.ts freely
     ↓
 Work complete → /jj-push
     ↓
-Plugin validates description, pushes to remote
+Gate LOCKS again (checkpoint complete)
+    ↓
+Next task? Run /jj "description" to start new checkpoint
 ```
 
 ## Why?

@@ -19,7 +19,8 @@ JJ (Jujutsu) treats the working copy as an implicit commit. The `jj new -m "desc
 1. Call `jj("description of your work")`
 2. This runs: `jj git fetch && jj new main@origin -m "description"`
 3. Gate unlocks - you can now edit files
-4. When done, call `jj_push()` to validate and push
+4. When done, call `jj_push()` to push
+5. Gate locks again - next task requires new `/jj "description"`
 
 ## Available Tools
 
@@ -94,7 +95,9 @@ You edit utils.ts freely
     ↓
 Work complete → jj_push()
     ↓
-Plugin validates description, pushes to remote
+Gate LOCKS again (checkpoint complete)
+    ↓
+Next task? Run jj("description") to start new checkpoint
 ```
 
 ## Subagent Behavior
