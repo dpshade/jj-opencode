@@ -1,5 +1,9 @@
 type Shell = any
 
+export function isValidEmail(email: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+}
+
 export async function isJJRepo($: Shell): Promise<boolean> {
   try {
     const result = await $.nothrow()`jj root`
