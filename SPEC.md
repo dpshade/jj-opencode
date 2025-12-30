@@ -2,8 +2,8 @@
 
 > OpenCode plugin that enforces JJ's "define change before implementation" philosophy
 
-**Version**: 0.1.0  
-**Status**: Draft  
+**Version**: 0.2.0  
+**Status**: Release Candidate  
 **Last Updated**: 2025-12-29
 
 ---

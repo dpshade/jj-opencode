@@ -27,10 +27,10 @@ The argument is the description of the work you're about to do. It must be:
 
 ## Action
 
-Call the `jj_init` tool with the provided description:
+Call the `jj` tool with the provided description:
 
 ```
-jj_init(description: "$ARGUMENTS")
+jj(description: "$ARGUMENTS")
 ```
 
 If no argument provided, ask the user what they want to work on.
