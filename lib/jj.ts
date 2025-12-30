@@ -314,3 +314,97 @@ export async function ensureWorkspacesIgnored($: Shell, repoRoot: string): Promi
     return { added: false, error: e.message || String(e) }
   }
 }
+
+export interface EmptyCommit {
+  changeId: string
+  description: string
+  bookmarks: string[]
+}
+
+/**
+ * JJ template: 'change_id.short() ++ "|" ++ description.first_line() ++ "|" ++ bookmarks'
+ * Revset: 'empty() & ~immutable() & ~@' excludes merged commits and current working copy
+ */
+export async function getEmptyCommits($: Shell): Promise<EmptyCommit[]> {
+  try {
+    const result = await $`jj log -r 'empty() & ~immutable() & ~@' --no-graph -T 'change_id.short() ++ "|" ++ description.first_line() ++ "|" ++ bookmarks ++ "\n"'`.text()
+    const lines = result.trim().split('\n').filter((l: string) => l.length > 0)
+    
+    return lines.map((line: string) => {
+      const [changeId, description, bookmarksStr] = line.split('|')
+      const bookmarks = bookmarksStr ? bookmarksStr.split(' ').filter((b: string) => b.length > 0) : []
+      return { changeId, description: description || '(no description)', bookmarks }
+    })
+  } catch {
+    return []
+  }
+}
+
+export interface StaleWorkspace {
+  name: string
+  changeId: string
+  reason: string
+}
+
+/**
+ * Finds workspaces that are stale: already merged to main or empty.
+ * JJ workspace list format: "workspace-name: changeId description"
+ */
+export async function getStaleWorkspaces($: Shell): Promise<StaleWorkspace[]> {
+  try {
+    const listResult = await $`jj workspace list`.text()
+    const lines = listResult.trim().split('\n')
+    const stale: StaleWorkspace[] = []
+    
+    for (const line of lines) {
+      const match = line.match(/^(\S+):\s+(\S+)\s*(.*)$/)
+      if (!match) continue
+      
+      const [, name, changeId, rest] = match
+      
+      if (name === 'default') continue
+      if (rest.includes('@')) continue
+      
+      const isEmpty = rest.includes('(empty)')
+      
+      try {
+        const ancestorCheck = await $.nothrow()`jj log -r '${changeId} & ::main' --no-graph -T 'change_id'`
+        const isMerged = ancestorCheck.exitCode === 0 && ancestorCheck.stdout.toString().trim().length > 0
+        
+        if (isMerged) {
+          stale.push({ name, changeId, reason: 'already merged to main' })
+        } else if (isEmpty) {
+          stale.push({ name, changeId, reason: 'empty workspace' })
+        }
+      } catch {
+        if (isEmpty) {
+          stale.push({ name, changeId, reason: 'empty workspace' })
+        }
+      }
+    }
+    
+    return stale
+  } catch {
+    return []
+  }
+}
+
+/**
+ * JJ abandon output includes "Deleted bookmarks: foo, bar" when bookmarks are removed
+ */
+export async function abandonCommits($: Shell, changeIds: string[]): Promise<{ success: boolean; abandoned: number; deletedBookmarks: string[]; error?: string }> {
+  if (changeIds.length === 0) {
+    return { success: true, abandoned: 0, deletedBookmarks: [] }
+  }
+  
+  try {
+    const result = await $`jj abandon ${changeIds}`.text()
+    const bookmarkMatch = result.match(/Deleted bookmarks?:\s*(.+)/i)
+    const deletedBookmarks = bookmarkMatch 
+      ? bookmarkMatch[1].split(',').map((b: string) => b.trim()).filter((b: string) => b.length > 0)
+      : []
+    return { success: true, abandoned: changeIds.length, deletedBookmarks }
+  } catch (e: any) {
+    return { success: false, abandoned: 0, deletedBookmarks: [], error: e.message || String(e) }
+  }
+}

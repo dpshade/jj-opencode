@@ -117,6 +117,7 @@ The plugin detects mode based on what tool is being blocked:
 | `jj_push(bookmark?, confirm?)` | Preview then push (requires `confirm: true`) |
 | `jj_workspace(description)` | Create workspace in .workspaces/ for parallel development |
 | `jj_workspaces()` | List all workspaces with their status |
+| `jj_cleanup(confirm?)` | Abandon empty commits and forget stale workspaces |
 | `jj_undo()` | Undo last JJ operation - instant recovery |
 | `jj_describe(message)` | Update description of current change |
 | `jj_abandon()` | Abandon current change, reset gate |
@@ -275,6 +276,8 @@ jj("Fix auth bug", from: "release-v2")
 | Want to start over | Run `jj_abandon()` then create new change |
 | Made a mistake | Run `jj_undo()` to revert last operation |
 | Push fails | Check `jj_status()`, fix issues, try `jj_push()` again |
+| Empty commits cluttering log | Run `jj_cleanup()` to abandon empty commits |
+| Stale workspaces | Run `jj_cleanup()` to forget workspaces whose changes merged |
 | Plugin not loading | Verify `~/.config/opencode/config.json` includes `"plugin": ["jj-opencode"]` |
 
 ## JJ Concepts

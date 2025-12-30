@@ -64,6 +64,7 @@ This means agents with file-writing capabilities proceed autonomously, while oth
 | `jj_push(bookmark?, confirm?)` | Validate and push - **REQUIRES explicit user permission** | After jj |
 | `jj_workspace(description)` | Create workspace in .workspaces/ for parallel development | Always |
 | `jj_workspaces()` | List all workspaces with status | Always |
+| `jj_cleanup(confirm?)` | Abandon empty commits and forget stale workspaces | Always |
 | `jj_git_init()` | Initialize JJ in non-JJ repo | Only if not JJ repo |
 | `jj_undo()` | Undo last JJ operation - instant recovery | Always |
 | `jj_describe(message)` | Update description of current change | After jj |
@@ -251,6 +252,20 @@ If the working directory is not a JJ repository:
 | Want to start over | Call `jj_abandon()` then `jj("new description")` |
 | Push fails | Check `jj_status()`, fix issues, try `jj_push()` again |
 | Made a mistake | Call `jj_undo()` to revert last operation |
+| Accumulated empty commits/stale workspaces | Call `jj_cleanup()` to clean up |
+
+## Cleanup
+
+The `jj_cleanup()` tool removes accumulated cruft:
+
+- **Empty commits**: Commits with no file changes (except @ and immutable)
+- **Stale workspaces**: Workspaces whose changes already merged to main, or are empty
+
+Usage (two-step like push):
+1. `jj_cleanup()` - Shows preview of what will be cleaned
+2. `jj_cleanup(confirm: true)` - Executes cleanup after user approval
+
+Cleanup also removes orphaned bookmarks that pointed to abandoned commits.
 
 ## JJ Concepts
 

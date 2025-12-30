@@ -543,6 +543,47 @@ const plugin: Plugin = async (ctx) => {
           return messages.WORKSPACE_LIST_HEADER + '\n' + rows.join('\n')
         },
       }),
+
+      jj_cleanup: tool({
+        description: "Clean up empty commits and stale workspaces. Shows preview first, then requires confirm:true to execute.",
+        args: {
+          confirm: tool.schema.boolean().optional().describe("Set to true to execute cleanup after reviewing preview"),
+        },
+        async execute(args, context) {
+          const emptyCommits = await jj.getEmptyCommits($)
+          const staleWorkspaces = await jj.getStaleWorkspaces($)
+
+          if (emptyCommits.length === 0 && staleWorkspaces.length === 0) {
+            return messages.CLEANUP_NOTHING_TO_DO
+          }
+
+          if (!args.confirm) {
+            return messages.CLEANUP_PREVIEW({ emptyCommits, staleWorkspaces })
+          }
+
+          let totalAbandoned = 0
+          let allDeletedBookmarks: string[] = []
+
+          if (emptyCommits.length > 0) {
+            const changeIds = emptyCommits.map(c => c.changeId)
+            const result = await jj.abandonCommits($, changeIds)
+            if (result.success) {
+              totalAbandoned = result.abandoned
+              allDeletedBookmarks = result.deletedBookmarks
+            }
+          }
+
+          let workspacesRemoved = 0
+          for (const workspace of staleWorkspaces) {
+            const result = await jj.workspaceForget($, workspace.name)
+            if (result.success) {
+              workspacesRemoved++
+            }
+          }
+
+          return messages.CLEANUP_SUCCESS(totalAbandoned, workspacesRemoved, allDeletedBookmarks)
+        },
+      }),
     },
   }
 }

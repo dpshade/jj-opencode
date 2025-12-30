@@ -231,3 +231,61 @@ You may now edit files. All changes will be tracked in this workspace.
 
 When ready to push, call \`jj_push()\`.
 `
+
+export interface CleanupPreviewData {
+  emptyCommits: Array<{ changeId: string; description: string; bookmarks: string[] }>
+  staleWorkspaces: Array<{ name: string; changeId: string; reason: string }>
+}
+
+export const CLEANUP_NOTHING_TO_DO = `
+**Nothing to clean up**
+
+No empty commits or stale workspaces found.
+`
+
+export const CLEANUP_PREVIEW = (data: CleanupPreviewData): string => {
+  const lines: string[] = ['**Cleanup preview**', '']
+  
+  if (data.emptyCommits.length > 0) {
+    lines.push(`### Empty commits (${data.emptyCommits.length})`)
+    lines.push('')
+    lines.push('| Change | Description | Bookmarks |')
+    lines.push('|--------|-------------|-----------|')
+    for (const c of data.emptyCommits) {
+      const bookmarks = c.bookmarks.length > 0 ? c.bookmarks.map(b => `\`${b}\``).join(', ') : '-'
+      lines.push(`| \`${c.changeId}\` | ${c.description} | ${bookmarks} |`)
+    }
+    lines.push('')
+  }
+  
+  if (data.staleWorkspaces.length > 0) {
+    lines.push(`### Stale workspaces (${data.staleWorkspaces.length})`)
+    lines.push('')
+    lines.push('| Workspace | Reason |')
+    lines.push('|-----------|--------|')
+    for (const w of data.staleWorkspaces) {
+      lines.push(`| \`${w.name}\` | ${w.reason} |`)
+    }
+    lines.push('')
+  }
+  
+  lines.push('**Confirm cleanup?** Call `jj_cleanup(confirm: true)` to proceed.')
+  
+  return lines.join('\n')
+}
+
+export const CLEANUP_SUCCESS = (abandoned: number, workspacesRemoved: number, deletedBookmarks: string[]): string => {
+  const lines: string[] = ['**Cleanup complete**', '']
+  
+  if (abandoned > 0) {
+    lines.push(`- Abandoned ${abandoned} empty commit${abandoned === 1 ? '' : 's'}`)
+  }
+  if (workspacesRemoved > 0) {
+    lines.push(`- Removed ${workspacesRemoved} stale workspace${workspacesRemoved === 1 ? '' : 's'}`)
+  }
+  if (deletedBookmarks.length > 0) {
+    lines.push(`- Deleted bookmarks: ${deletedBookmarks.map(b => `\`${b}\``).join(', ')}`)
+  }
+  
+  return lines.join('\n')
+}
