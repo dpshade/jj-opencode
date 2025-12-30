@@ -76,6 +76,20 @@ export async function gitFetch($: Shell): Promise<{ success: boolean; error?: st
   }
 }
 
+export async function newFromMain($: Shell): Promise<{ success: boolean; error?: string }> {
+  try {
+    await $`jj new main@origin`
+    return { success: true }
+  } catch {
+    try {
+      await $`jj new main`
+      return { success: true }
+    } catch (e: any) {
+      return { success: false, error: e.message || String(e) }
+    }
+  }
+}
+
 export async function newChange($: Shell, description: string): Promise<{ success: boolean; changeId?: string; error?: string }> {
   // Try main@origin first (remote tracking branch)
   try {

@@ -327,6 +327,7 @@ const plugin: Plugin = async (ctx) => {
               }
               try { await $`rm -rf ${actualWorkspacePath}` } catch {}
               await jj.gitFetch($)
+              await jj.newFromMain($)
               setState(context.sessionID, {
                 gateUnlocked: false,
                 changeId: null,
@@ -376,6 +377,7 @@ const plugin: Plugin = async (ctx) => {
             }
             try { await $`rm -rf ${actualWorkspacePath}` } catch {}
             await jj.gitFetch($)
+            await jj.newFromMain($)
             setState(context.sessionID, {
               gateUnlocked: false,
               changeId: null,
@@ -479,6 +481,7 @@ const plugin: Plugin = async (ctx) => {
               try { await $`rm -rf ${workspacePath}` } catch {}
             }
             await jj.gitFetch($)
+            await jj.newFromMain($)
             return `Change abandoned and workspace \`${workspaceName}\` cleaned up. Gate is now locked. Call \`jj()\` to start a new change.`
           }
 
