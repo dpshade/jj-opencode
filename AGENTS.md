@@ -214,6 +214,23 @@ jj_workspace("Add authentication system")
 - Gate still requires `jj()` call in new workspace sessions
 - Add `.workspaces/` to your `.gitignore`
 
+### Nested Workspaces Are Blocked
+
+**Nested workspaces are never created.** If you're already inside a workspace and try to create another, it becomes a sibling at the repo root instead:
+
+```
+# You're in: .workspaces/add-auth/
+# You call: jj_workspace("Fix login bug")
+# Result:   .workspaces/fix-login-bug/  (sibling, not nested)
+```
+
+This prevents:
+```
+.workspaces/add-auth/.workspaces/fix-bug/  ← NEVER happens
+```
+
+The plugin detects workspace location via path and automatically redirects to the repo root.
+
 ## Named Bookmarks (Feature Branches)
 
 For team workflows, use named bookmarks instead of pushing directly to main:

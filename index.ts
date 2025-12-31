@@ -239,22 +239,25 @@ const plugin: Plugin = async (ctx) => {
 
           if (isDefaultWorkspace && !args.from) {
             const currentRoot = await jj.getWorkspaceRoot($)
+            const location = jj.detectWorkspaceLocation(currentRoot)
+            const actualRepoRoot = location.repoRoot
+            
             const workspaceSlug = slugify(args.description)
             const workspaceName = workspaceSlug
-            const workspacesDir = `${currentRoot}/.workspaces`
+            const workspacesDir = `${actualRepoRoot}/.workspaces`
             const workspacePath = `${workspacesDir}/${workspaceSlug}`
 
             try {
               await $`mkdir -p ${workspacesDir}`
             } catch {}
 
-            const ignoreResult = await jj.ensureWorkspacesIgnored($, currentRoot)
+            const ignoreResult = await jj.ensureWorkspacesIgnored($, actualRepoRoot)
             let gitignoreNote = ''
             if (ignoreResult.added) {
               gitignoreNote = '**Note**: Added `.workspaces/` to `.gitignore`\n\n'
             }
 
-            const addResult = await jj.workspaceAdd($, workspacePath, workspaceName, 'main@origin')
+            const addResult = await jj.workspaceAdd($, workspacePath, workspaceName, 'main@origin', actualRepoRoot)
             if (!addResult.success) {
               return `Error creating workspace: ${addResult.error}`
             }
@@ -278,6 +281,15 @@ const plugin: Plugin = async (ctx) => {
               bookmark: bookmarkResult.success ? bookmarkName : null,
             })
 
+            if (location.isInsideWorkspace) {
+              return warning + gitignoreNote + messages.JJ_WORKSPACE_SIBLING_REDIRECT(
+                changeId || 'unknown',
+                args.description,
+                workspaceName,
+                workspacePath,
+                location.currentWorkspaceSlug!
+              )
+            }
             return warning + gitignoreNote + messages.JJ_WORKSPACE_REDIRECT(
               changeId || 'unknown',
               args.description,
@@ -599,20 +611,26 @@ const plugin: Plugin = async (ctx) => {
           }
 
           const currentRoot = await jj.getWorkspaceRoot($, cwd)
+          const location = jj.detectWorkspaceLocation(currentRoot)
+          const actualRepoRoot = location.repoRoot
+          
           const workspaceSlug = slugify(args.description)
           const workspaceName = workspaceSlug
-          const workspacesDir = `${currentRoot}/.workspaces`
+          const workspacesDir = `${actualRepoRoot}/.workspaces`
           const workspacePath = `${workspacesDir}/${workspaceSlug}`
 
           try {
             await $`mkdir -p ${workspacesDir}`
           } catch {}
 
-          const addResult = await jj.workspaceAdd($, workspacePath, workspaceName, 'main@origin')
+          const addResult = await jj.workspaceAdd($, workspacePath, workspaceName, 'main@origin', actualRepoRoot)
           if (!addResult.success) {
             return `Error creating workspace: ${addResult.error}`
           }
 
+          if (location.isInsideWorkspace) {
+            return warning + messages.WORKSPACE_SIBLING_CREATED(workspaceName, workspacePath, args.description, location.currentWorkspaceSlug!)
+          }
           return warning + messages.WORKSPACE_CREATED(workspaceName, workspacePath, args.description)
         },
       }),

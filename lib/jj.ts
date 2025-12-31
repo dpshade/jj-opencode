@@ -392,3 +392,30 @@ export async function abandonCommits($: Shell, changeIds: string[], cwd?: string
     return { success: false, abandoned: 0, deletedBookmarks: [], error: e.message || String(e) }
   }
 }
+
+export interface WorkspaceLocation {
+  isInsideWorkspace: boolean
+  repoRoot: string
+  currentWorkspaceSlug: string | null
+}
+
+/**
+ * Detect if a path is inside a .workspaces/ directory and extract the repo root.
+ * Used to prevent nested workspace creation - if we're already in a workspace,
+ * new workspaces should be created as siblings at the repo root.
+ */
+export function detectWorkspaceLocation(currentPath: string): WorkspaceLocation {
+  const match = currentPath.match(/^(.+?)\/\.workspaces\/([^/]+)/)
+  if (match) {
+    return {
+      isInsideWorkspace: true,
+      repoRoot: match[1],
+      currentWorkspaceSlug: match[2],
+    }
+  }
+  return {
+    isInsideWorkspace: false,
+    repoRoot: currentPath,
+    currentWorkspaceSlug: null,
+  }
+}

@@ -1,7 +1,3 @@
-export function logInfo(message: string): void {
-  console.log(`[INFO] ${message}`)
-}
-
 export const GATE_BLOCK_MESSAGE_PLANNING = `
 **Edit blocked**: No JJ change defined.
 
@@ -150,6 +146,26 @@ cd ${path} && opencode
 Then call \`jj("your task description")\` to unlock editing.
 `
 
+export const WORKSPACE_SIBLING_CREATED = (name: string, path: string, description: string, currentWorkspace: string): string => `
+**Sibling workspace created** (nested workspaces not allowed)
+
+Already in workspace \`${currentWorkspace}\`. Creating sibling at repo root instead.
+
+| Field | Value |
+|-------|-------|
+| Workspace | \`${name}\` |
+| Path | \`${path}\` |
+| Description | ${description} |
+| Base | \`main@origin\` (latest remote) |
+
+**To work in this workspace**, start a new OpenCode session:
+\`\`\`bash
+cd ${path} && opencode
+\`\`\`
+
+Then call \`jj("your task description")\` to unlock editing.
+`
+
 export const WORKSPACE_LIST_HEADER = `
 ## JJ Workspaces
 
@@ -218,6 +234,26 @@ When ready to push, call \`jj_push()\`.
 
 export const JJ_WORKSPACE_REDIRECT = (changeId: string, description: string, workspaceName: string, workspacePath: string): string => `
 **Workspace created and session moved**
+
+| Field | Value |
+|-------|-------|
+| Change ID | \`${changeId}\` |
+| Description | ${description} |
+| Workspace | \`${workspaceName}\` |
+| Path | \`${workspacePath}\` |
+| Base | \`main@origin\` (latest remote) |
+
+You may now edit files. All changes will be tracked in this workspace.
+
+**IMPORTANT**: You are now in a new directory. Re-read any files you need to edit from \`${workspacePath}/\` — your previous file reads are from the old location.
+
+When ready to push, call \`jj_push()\`.
+`
+
+export const JJ_WORKSPACE_SIBLING_REDIRECT = (changeId: string, description: string, workspaceName: string, workspacePath: string, currentWorkspace: string): string => `
+**Sibling workspace created and session moved** (nested workspaces not allowed)
+
+Already in workspace \`${currentWorkspace}\`. Creating sibling at repo root instead.
 
 | Field | Value |
 |-------|-------|
