@@ -66,10 +66,6 @@ BEFORE calling: Show preview with 'jj log -r @' and 'jj diff --stat', ask user t
           return "Not a JJ repository."
         }
 
-        if (!args.confirmed) {
-          return "Show preview first with 'jj log -r @' and 'jj diff --stat', then call with confirmed: true"
-        }
-
         const bookmark = args.bookmark || 'main'
         const info = await getChangeInfo($)
 
@@ -78,6 +74,10 @@ BEFORE calling: Show preview with 'jj log -r @' and 'jj diff --stat', ask user t
         }
         if (!info.stats) {
           return "Cannot push: no file changes."
+        }
+
+        if (!args.confirmed) {
+          return "Show preview first with 'jj log -r @' and 'jj diff --stat', then call with confirmed: true"
         }
 
         try {
