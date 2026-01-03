@@ -39,7 +39,30 @@ Until `jj describe -m "description"` is run:
 | View history | `jj log` |
 | Undo | `jj undo` |
 | Abandon current work | `jj abandon @` |
-| Push to remote | `jj bookmark move main --to @ --allow-backwards && jj git push -b main` |
+| Push to remote | `jj_push` tool (or specify bookmark: `jj_push bookmark="feature"`) |
+
+## Tools
+
+### jj_push
+
+Safely pushes the current change to a bookmark (defaults to `main`).
+
+```
+jj_push                      ← push to main
+jj_push bookmark="feature"   ← push to feature branch (user must specify)
+```
+
+The tool:
+1. Shows a preview with change ID, description, and files
+2. Requires user confirmation before pushing
+3. Runs `jj new` → `jj bookmark set` → `jj git push`
+4. Leaves working copy clean and ready for new work
+
+**Important:** Only specify a bookmark if the user explicitly requested it.
+
+## Subagents
+
+If a subagent tries to edit without a description, it will be blocked and instructed to return to the parent agent. Only the primary agent should manage JJ workflow (describe, new, push).
 
 ## Why This Workflow?
 

@@ -50,7 +50,29 @@ Add to `~/.config/opencode/config.json`:
 | Undo | `jj undo` |
 | Status | `jj st` |
 | History | `jj log` |
-| Push | `jj bookmark move main --to @ --allow-backwards && jj git push -b main` |
+| Push | `jj_push` tool |
+
+## Tools
+
+### jj_push
+
+Safely pushes current change to a bookmark.
+
+```
+jj_push                      ← push to main (default)
+jj_push bookmark="feature"   ← push to specific branch
+```
+
+- Shows preview before pushing
+- Requires user confirmation
+- Runs `jj new` + bookmark move + push
+- Leaves working copy clean
+
+Only specify `bookmark` if user explicitly requested it.
+
+## Subagents
+
+Subagents that hit the edit gate are blocked and told to return to the parent agent. JJ workflow (describe/new/push) should only be managed by the primary agent.
 
 ## Why?
 
