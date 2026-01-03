@@ -2,39 +2,29 @@
 
 <div align="center">
 
-**Describe what you're doing. Then do it.**
+**Checkpoint before you edit. Undo anything.**
 
 [![npm version](https://img.shields.io/npm/v/jj-opencode.svg?color=cb3837&labelColor=black&style=flat-square)](https://www.npmjs.com/package/jj-opencode)
 [![License: MIT](https://img.shields.io/badge/License-MIT-white?labelColor=black&style=flat-square)](https://opensource.org/licenses/MIT)
 
 </div>
 
-A minimal [OpenCode](https://github.com/opencode-ai/opencode) plugin that enforces JJ's workflow philosophy: **declare intent before implementation**.
+An [OpenCode](https://github.com/opencode-ai/opencode) plugin that forces a checkpoint before every edit.
 
----
-
-## What It Does
-
-Blocks file edits until you describe what you're doing:
+## How It Works
 
 ```
-You: "Add input validation"
-AI: [tries to edit file] → BLOCKED
+AI: jj new -m "Add validation"   ← checkpoint
+AI: [edits files]                ← all edits in this commit
 
-AI: jj("Add input validation to signup form")
-    → Change created, gate unlocked
+AI: jj new -m "Add tests"        ← new checkpoint  
+AI: [edits files]                ← all edits in this commit
 
-AI: [edits files freely]
-
-You: "ship it"
-AI: jj_push() → shows preview, waits for confirmation
-You: "yes"
-AI: jj_push(confirm: true) → pushed, gate locked
+User: "undo that"
+AI: jj undo                      ← reverts entire "Add tests" checkpoint
 ```
 
-That's it. ~170 lines of code. Three tools.
-
----
+40 lines of code. Zero tools. Just: checkpoint before edit.
 
 ## Installation
 
@@ -49,67 +39,21 @@ Add to `~/.config/opencode/config.json`:
 }
 ```
 
-**Requirements**: [JJ](https://github.com/jj-vcs/jj) and [OpenCode](https://github.com/opencode-ai/opencode)
+## Commands
 
----
-
-## Tools
-
-| Tool | Purpose |
+| Task | Command |
 |------|---------|
-| `jj("description")` | Create JJ change, unlock editing |
-| `jj_push()` | Show preview, push after confirmation |
-| `jj_status()` | Show gate state and current changes |
-
-Everything else is raw JJ commands via bash.
-
----
+| Checkpoint | `jj new -m "what you're doing"` |
+| Undo | `jj undo` |
+| Status | `jj st` |
+| History | `jj log` |
+| Push | `jj bookmark move main --to @ --allow-backwards && jj git push -b main` |
 
 ## Why?
 
-JJ treats the working copy as an implicit commit. This plugin enforces that at the tooling level:
-
-1. **Intentionality** — Think before you code
-2. **Audit trail** — Every change has a description from the start
-3. **Clean history** — No "WIP" or "fix typo" commits
-
----
-
-## Parallel Development
-
-Just use `jj new` multiple times in the same directory:
-
-```bash
-# Feature A
-jj new main@origin -m "Add authentication"
-# work...
-
-# Feature B (same directory!)
-jj new main@origin -m "Fix bug #123"
-# work on different change...
-```
-
-JJ handles the isolation natively. No workspaces needed.
-
----
-
-## Subagent Inheritance
-
-When you spawn subagents via the `task` tool, they inherit the parent session's gate state. If the parent called `jj()`, subagents can edit immediately.
-
----
-
-## Troubleshooting
-
-| Problem | Solution |
-|---------|----------|
-| Edit blocked | `jj("description")` |
-| Wrong description | `jj describe -m "new description"` |
-| Abandon work | `jj abandon @` |
-| Undo mistake | `jj undo` |
-| Push failed | `jj st`, fix issues, retry |
-
----
+- **Never lose work** — every edit is checkpointed
+- **Easy undo** — `jj undo` reverts one logical unit
+- **Clear history** — every commit has meaning
 
 ## License
 

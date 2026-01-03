@@ -1,112 +1,68 @@
 ---
 name: jj-opencode
-description: "JJ VCS integration - enforces 'declare intent before implementation'"
+description: "JJ VCS integration - checkpoint before every edit"
 alwaysApply: true
 ---
 
-# jj-opencode Plugin
+# jj-opencode
 
-**One job: block file edits until you declare what you're doing.**
+Blocks edits until you create a checkpoint. Every logical unit of work gets its own commit.
 
-## How It Works
+## Workflow
 
 ```
-Session starts → Gate is LOCKED
-       ↓
-You try to edit → BLOCKED
-       ↓
-You call: jj("Add input validation")
-       ↓
-Gate UNLOCKS, JJ change created
-       ↓
-You edit files freely
-       ↓
-Work complete → jj_push()
-       ↓
-User confirms → pushed
-       ↓
-Gate LOCKS → ready for next task
+jj new -m "Add input validation"    ← checkpoint created
+[edit files]                         ← edits go to this commit
+jj new -m "Add tests for validation" ← new checkpoint
+[edit files]                         ← edits go to this commit
+jj new -m "Fix edge case"            ← new checkpoint
+[edit files]
 ```
 
-## Tools
-
-| Tool | Purpose |
-|------|---------|
-| `jj("description")` | Create JJ change, unlock gate |
-| `jj_push()` | Show preview, then push (requires user confirmation) |
-| `jj_status()` | Show gate state and current changes |
-
-That's it. Everything else is raw JJ commands.
+**If something goes wrong:** `jj undo` reverts the last checkpoint entirely.
 
 ## What's Blocked
 
-Until you call `jj("description")`:
-- `write`, `edit` - File creation/modification
-- `lsp_rename`, `lsp_code_action_resolve` - LSP modifications
-- `ast_grep_replace` - AST-based replacements
+Until `jj new -m "description"` is run:
+- `write`, `edit`
+- `lsp_rename`, `lsp_code_action_resolve`
+- `ast_grep_replace`
 
-## What's Always Allowed
+## Commands
 
-- All read operations (`read`, `glob`, `grep`, `lsp_hover`, etc.)
-- All JJ commands via bash (`jj log`, `jj diff`, `jj st`, etc.)
-- All other tools
+| Task | Command |
+|------|---------|
+| Create checkpoint | `jj new -m "what you're about to do"` |
+| Check status | `jj st` |
+| View history | `jj log` |
+| Undo last checkpoint | `jj undo` |
+| Update description | `jj describe -m "better description"` |
+| Abandon current work | `jj abandon @` |
+| Push to remote | `jj bookmark move main --to @ --allow-backwards && jj git push -b main` |
 
-## Workflow Rules
+## Why Checkpoints?
 
-### Use JJ, Not Git
+1. **Never lose work** — every edit is in a described commit
+2. **Easy undo** — `jj undo` reverts exactly one logical unit
+3. **Clear history** — `jj log` shows what happened step by step
+4. **No WIP commits** — every commit has meaning
 
-| Don't | Do |
-|-------|-----|
+## Don't Use Git
+
+| Git | JJ |
+|-----|-----|
 | `git status` | `jj st` |
 | `git log` | `jj log` |
 | `git diff` | `jj diff` |
-| `git add && git commit` | Not needed - JJ auto-tracks |
-| `git push` | `jj_push()` or `jj git push -b main` |
-| `git checkout -b` | `jj new -m "description"` |
-| `git stash` | Not needed - just `jj new` |
+| `git add && git commit` | Not needed |
+| `git push` | `jj git push -b main` |
 
-### Parallel Development
+## Before Push
 
-For multiple features, just use `jj new` multiple times:
-
+Show the user:
 ```bash
-# Feature A
-jj new main@origin -m "Add authentication"
-# work...
-
-# Feature B (in same directory!)
-jj new main@origin -m "Fix bug #123"  
-# work on different change...
+jj log -r @
+jj diff --stat
 ```
 
-JJ handles the isolation. No workspaces needed.
-
-### Push Requires Confirmation
-
-The AI must NEVER call `jj_push(confirm: true)` without explicit user approval:
-
-1. `jj_push()` - Shows preview
-2. **Wait for user to say "yes"**
-3. `jj_push(confirm: true)` - Only after approval
-
-## Subagent Behavior
-
-Subagents inherit the parent's gate state. If parent called `jj()`, subagents can edit immediately.
-
-## Error Recovery
-
-| Problem | Solution |
-|---------|----------|
-| Edit blocked | Call `jj("description")` |
-| Wrong description | `jj describe -m "new description"` |
-| Abandon work | `jj abandon @` |
-| Undo mistake | `jj undo` |
-| Push failed | Check `jj st`, fix, try again |
-
-## Why This Exists
-
-JJ treats the working copy as an implicit commit. This plugin enforces that philosophy at the tooling level:
-
-1. **Intentionality** - Think about what you're doing before doing it
-2. **Audit trail** - Every change has a description from the start
-3. **Clean history** - No "WIP" or "fix" commits
+Wait for explicit "yes" before pushing.
