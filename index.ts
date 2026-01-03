@@ -1,719 +1,203 @@
 import type { Plugin } from "@opencode-ai/plugin"
 import { tool } from "@opencode-ai/plugin"
-import { createState, getState, setState, inheritParentState, deleteState } from './lib/state.js'
-import { checkGate, isGatedTool } from './lib/gate.js'
-import { checkForGitCommand, checkForJJCommand, checkForJJPushMain, isModifyingBashCommand } from './lib/bash-filter.js'
-import { getParentSessionId } from './lib/subagent.js'
-import * as jj from './lib/jj.js'
-import * as messages from './lib/messages.js'
 
-function slugify(text: string): string {
-  return text
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 50)
-}
+/**
+ * jj-opencode: Minimal gate enforcement for JJ workflows
+ * 
+ * Core concept: Block file edits until the agent declares intent via jj("description")
+ * 
+ * That's it. Everything else is JJ CLI.
+ */
 
-function validateDescription(description: string): { valid: boolean; message?: string } {
-  const trimmed = description.trim()
-  
-  // Check minimum length
-  if (trimmed.length < 10) {
-    return {
-      valid: false,
-      message: messages.DESCRIPTION_TOO_SHORT(trimmed.length),
-    }
-  }
-  
-  // Check for single-word descriptions
-  const words = trimmed.split(/\s+/).filter(w => w.length > 0)
-  if (words.length < 2) {
-    return {
-      valid: false,
-      message: messages.DESCRIPTION_SINGLE_WORD,
-    }
-  }
-  
-  return { valid: true }
-}
+type Shell = any
 
-interface CleanupResult {
-  cleaned: number
-  activeWorkspaces: string[]
-}
+const GATED_TOOLS = new Set([
+  'write', 'edit', 
+  'lsp_rename', 'lsp_code_action_resolve', 
+  'ast_grep_replace'
+])
 
-async function silentCleanup($: any, cwd?: string): Promise<CleanupResult> {
-  const result: CleanupResult = { cleaned: 0, activeWorkspaces: [] }
+// Minimal session state: just unlocked status and parent reference
+const sessions = new Map<string, { unlocked: boolean; parent?: string }>()
+
+async function getDescription($: Shell): Promise<string> {
   try {
-    const [emptyCommits, workspaceAnalysis] = await Promise.all([
-      jj.getEmptyCommits($, cwd),
-      jj.analyzeWorkspaces($, cwd),
-    ])
-    
-    if (emptyCommits.length > 0) {
-      const changeIds = emptyCommits.map(c => c.changeId)
-      const abandonResult = await jj.abandonCommits($, changeIds, cwd)
-      if (abandonResult.success) result.cleaned += abandonResult.abandoned
-    }
-    
-    for (const workspace of workspaceAnalysis.stale) {
-      const forgetResult = await jj.workspaceForget($, workspace.name, cwd)
-      if (forgetResult.success) result.cleaned++
-    }
-    
-    result.activeWorkspaces = workspaceAnalysis.active.map(w => w.name)
-    return result
-  } catch {
-    return result
-  }
+    return (await $`jj log -r @ --no-graph -T description 2>/dev/null`.text()).trim()
+  } catch { return '' }
 }
 
-const plugin: Plugin = async (ctx) => {
-  const { client, $ } = ctx
+async function hasChanges($: Shell): Promise<boolean> {
+  try {
+    return (await $`jj diff --stat 2>/dev/null`.text()).trim().length > 0
+  } catch { return false }
+}
 
-  return {
-    event: async ({ event }) => {
-      if (event.type === 'session.created') {
-        const sessionId = event.properties.info.id
+async function isJJRepo($: Shell): Promise<boolean> {
+  try {
+    await $`jj root 2>/dev/null`.text()
+    return true
+  } catch { return false }
+}
 
-        const parentId = await getParentSessionId(client, sessionId)
-        if (parentId) {
-          const inherited = inheritParentState(sessionId, parentId)
-          if (inherited) {
-            return
-          }
-        }
+const plugin: Plugin = async ({ client, $ }) => ({
+  name: 'jj-opencode',
 
-        const isJJRepo = await jj.isJJRepo($)
+  event: async ({ event }) => {
+    if (event.type === 'session.created') {
+      const id = event.properties.info.id
 
-        if (!isJJRepo) {
-          createState(sessionId, {
-            gateUnlocked: false,
-            isJJRepo: false,
-          })
-          return
-        }
-
-        const [changeId, description, hasModifications, workspaceName, workspacePath, bookmark] = await Promise.all([
-          jj.getCurrentChangeId($),
-          jj.getCurrentDescription($),
-          jj.hasUncommittedChanges($),
-          jj.getWorkspaceName($),
-          jj.getWorkspaceRoot($),
-          jj.getBookmarkForChange($),
-        ])
-        const hasActiveWork = description.length > 0 || hasModifications
-
-        createState(sessionId, {
-          gateUnlocked: hasActiveWork,
-          changeId,
-          changeDescription: description,
-          isJJRepo: true,
-          workspace: workspaceName,
-          workspacePath,
-          bookmark,
-        })
-      }
-
-      if (event.type === 'session.deleted') {
-        deleteState(event.properties.info.id)
-      }
-    },
-
-    "tool.execute.before": async (input, output) => {
-      const { tool: toolName, sessionID } = input
-
-      // Our own plugin tools are never blocked - they handle their own logic
-      if (toolName.startsWith('jj_') || toolName === 'jj') {
+      // Check for parent session (subagent inheritance)
+      const response = await client.session.list()
+      const allSessions = response.data || []
+      const parent = allSessions.find((s: any) => s.id !== id && sessions.get(s.id)?.unlocked)
+      if (parent) {
+        sessions.set(id, { unlocked: true, parent: parent.id })
         return
       }
 
-      if (toolName === 'bash') {
-        const command = output.args?.command || ''
-        
-        const gitCheck = checkForGitCommand(command)
-        if (gitCheck.isGitCommand) {
-          throw new Error(messages.GIT_COMMAND_BLOCKED(
-            gitCheck.gitSubcommand!,
-            gitCheck.jjAlternative!
-          ))
-        }
-
-        const warnings: string[] = []
-
-        const jjCheck = checkForJJCommand(command)
-        if (jjCheck.hasPluginEquivalent) {
-          warnings.push(messages.JJ_COMMAND_WARNING(
-            jjCheck.jjSubcommand!,
-            jjCheck.pluginAlternative!
-          ))
-        }
-
-        const pushMainCheck = checkForJJPushMain(command)
-        if (pushMainCheck.isPushingToMain) {
-          warnings.push(messages.JJ_PUSH_MAIN_WARNING)
-        }
-
-        if (isModifyingBashCommand(command)) {
-          const gateCheck = await checkGate($, 'bash')
-          if (!gateCheck.allowed) {
-            warnings.push(messages.BASH_MODIFY_WARNING(command))
-          }
-        }
-
-        if (warnings.length > 0) {
-          const state = getState(sessionID)
-          if (state) {
-            setState(sessionID, {
-              pendingWarnings: [...state.pendingWarnings, ...warnings],
-            })
-          }
-        }
+      // Not a JJ repo? Always unlocked (plugin is a no-op)
+      if (!await isJJRepo($)) {
+        sessions.set(id, { unlocked: true })
         return
       }
 
-      if (isGatedTool(toolName)) {
-        const gateCheck = await checkGate($, toolName)
-        if (!gateCheck.allowed) {
-          throw new Error(gateCheck.message)
+      // Unlock if work already in progress
+      const [desc, changes] = await Promise.all([getDescription($), hasChanges($)])
+      sessions.set(id, { unlocked: desc.length > 0 || changes })
+    }
+
+    if (event.type === 'session.deleted') {
+      sessions.delete(event.properties.info.id)
+    }
+  },
+
+  "tool.execute.before": async ({ tool: name, sessionID }) => {
+    if (!GATED_TOOLS.has(name)) return
+    
+    const state = sessions.get(sessionID)
+    if (state?.unlocked) return
+
+    // Double-check JJ state (in case of manual jj commands)
+    const [desc, changes] = await Promise.all([getDescription($), hasChanges($)])
+    if (desc.length > 0 || changes) {
+      sessions.set(sessionID, { ...state, unlocked: true })
+      return
+    }
+
+    throw new Error(
+      `**Edit blocked**: Declare your intent first.\n\n` +
+      `Call \`jj("description of what you're implementing")\` to unlock editing.\n\n` +
+      `This ensures every change has a meaningful commit message from the start.`
+    )
+  },
+
+  tool: {
+    jj: tool({
+      description: "Create a JJ change and unlock file editing. Call this BEFORE making any edits.",
+      args: {
+        description: tool.schema.string().describe("What you're about to implement (min 10 chars)"),
+      },
+      async execute({ description }, { sessionID }) {
+        const desc = description.trim()
+        if (desc.length < 10) {
+          return `Description too short (${desc.length} chars). Be specific about what you're implementing.`
         }
-      }
-    },
+        if (desc.split(/\s+/).length < 2) {
+          return `Description must be more than one word. Example: "Add user authentication"`
+        }
 
-    "tool.execute.after": async (input, output) => {
-      const { tool: toolName, sessionID } = input
-      const state = getState(sessionID)
+        // Fetch latest from remote
+        try { await $`jj git fetch 2>/dev/null` } catch {}
 
-      if (!state) return
-
-      if (toolName === 'bash' && state.pendingWarnings.length > 0) {
-        const warningBlock = state.pendingWarnings.join('\n\n---\n\n')
-        // Inject warning into chat context without TUI display
+        // Create new change from main@origin (or main)
         try {
-          await client.session.prompt({
-            path: { id: sessionID },
-            body: {
-              noReply: true,
-              parts: [{ type: 'text', text: `[System Note]\n${warningBlock}` }],
-            },
-          })
+          await $`jj new main@origin -m ${desc} 2>/dev/null`
         } catch {
-          // Silently fail if injection doesn't work
-        }
-        setState(sessionID, { pendingWarnings: [] })
-      }
-
-      if (toolName === 'write' || toolName === 'edit') {
-        const filePath = output.metadata?.filePath || output.title
-        if (filePath && !state.modifiedFiles.includes(filePath)) {
-          setState(sessionID, {
-            modifiedFiles: [...state.modifiedFiles, filePath],
-          })
-        }
-      }
-    },
-
-    tool: {
-      jj: tool({
-        description: "Create a new JJ change and unlock file editing. Run this BEFORE making any file edits. When called from the default workspace, automatically creates a dedicated workspace and moves the session there.",
-        args: {
-          description: tool.schema.string().describe("Description of the work you're about to do"),
-          bookmark: tool.schema.string().optional().describe("Create a named bookmark for this change (auto-generated from description if not provided)"),
-          from: tool.schema.string().optional().describe("Base revision to branch from (defaults to main@origin)"),
-        },
-        async execute(args, context) {
-          const validation = validateDescription(args.description)
-          if (!validation.valid) {
-            return validation.message!
-          }
-
-          let warning = ''
-          const fetchResult = await jj.gitFetch($)
-          if (!fetchResult.success) {
-            warning = `Note: git fetch skipped (${fetchResult.error})\n\n`
-          }
-
-          const currentWorkspace = await jj.getWorkspaceName($)
-          const isDefaultWorkspace = currentWorkspace === 'default'
-
-          if (isDefaultWorkspace && !args.from) {
-            const currentRoot = await jj.getWorkspaceRoot($)
-            const location = jj.detectWorkspaceLocation(currentRoot)
-            const actualRepoRoot = location.repoRoot
-            
-            const workspaceSlug = slugify(args.description)
-            const workspaceName = workspaceSlug
-            const workspacesDir = `${actualRepoRoot}/.workspaces`
-            const workspacePath = `${workspacesDir}/${workspaceSlug}`
-
-            try {
-              await $`mkdir -p ${workspacesDir}`
-            } catch {}
-
-            const ignoreResult = await jj.ensureWorkspacesIgnored($, actualRepoRoot)
-            let gitignoreNote = ''
-            if (ignoreResult.added) {
-              gitignoreNote = '**Note**: Added `.workspaces/` to `.gitignore`\n\n'
-            }
-
-            const defaultRevset = await jj.getDefaultBranchRevset($, actualRepoRoot)
-            const addResult = await jj.workspaceAdd($, workspacePath, workspaceName, defaultRevset, actualRepoRoot)
-            if (!addResult.success) {
-              return `Error creating workspace: ${addResult.error}`
-            }
-
-            const describeResult = await jj.describe($, args.description, workspacePath)
-            if (!describeResult.success) {
-              return `Error describing workspace change: ${describeResult.error}`
-            }
-            const changeId = await jj.getCurrentChangeId($, workspacePath)
-
-            const bookmarkName = args.bookmark || workspaceSlug
-            const bookmarkResult = await jj.bookmarkSet($, bookmarkName, workspacePath)
-
-            setState(context.sessionID, {
-              gateUnlocked: true,
-              changeId: changeId || null,
-              changeDescription: args.description,
-              isJJRepo: true,
-              workspace: workspaceName,
-              workspacePath,
-              bookmark: bookmarkResult.success ? bookmarkName : null,
-            })
-
-            if (location.isInsideWorkspace) {
-              return warning + gitignoreNote + messages.JJ_WORKSPACE_SIBLING_REDIRECT(
-                changeId || 'unknown',
-                args.description,
-                workspaceName,
-                workspacePath,
-                location.currentWorkspaceSlug!
-              )
-            }
-            return warning + gitignoreNote + messages.JJ_WORKSPACE_REDIRECT(
-              changeId || 'unknown',
-              args.description,
-              workspaceName,
-              workspacePath
-            )
-          }
-
-          let newResult: { success: boolean; changeId?: string; error?: string }
-          if (args.from) {
-            newResult = await jj.newChangeFrom($, args.from, args.description)
-          } else {
-            newResult = await jj.newChange($, args.description)
-          }
-          
-          if (!newResult.success) {
-            return `Error creating change: ${newResult.error}`
-          }
-
-          const bookmarkName = args.bookmark || slugify(args.description)
-          let bookmarkCreated = false
-          if (args.bookmark || args.from) {
-            const bookmarkResult = await jj.bookmarkSet($, bookmarkName)
-            bookmarkCreated = bookmarkResult.success
-          }
-
-          setState(context.sessionID, {
-            gateUnlocked: true,
-            changeId: newResult.changeId || null,
-            changeDescription: args.description,
-            isJJRepo: true,
-            bookmark: bookmarkCreated ? bookmarkName : null,
-          })
-
-          if (bookmarkCreated) {
-            return warning + messages.JJ_INIT_SUCCESS_WITH_BOOKMARK(newResult.changeId || 'unknown', args.description, bookmarkName)
-          } else if (args.from) {
-            return warning + messages.JJ_INIT_SUCCESS_FROM(newResult.changeId || 'unknown', args.description, args.from)
-          }
-          return warning + messages.JJ_INIT_SUCCESS(newResult.changeId || 'unknown', args.description)
-        },
-      }),
-
-      jj_status: tool({
-        description: "Show current JJ change status, gate state, and diff summary",
-        args: {},
-        async execute(args, context) {
-          const state = getState(context.sessionID)
-          const cwd = state?.workspacePath || undefined
-          const [isRepo, changeId, description, hasModifications, diffSummary, status, workspaceName, bookmark] = await Promise.all([
-            jj.isJJRepo($),
-            jj.getCurrentChangeId($, cwd),
-            jj.getCurrentDescription($, cwd),
-            jj.hasUncommittedChanges($, cwd),
-            jj.getDiffSummary($, cwd),
-            jj.getStatus($, cwd),
-            jj.getWorkspaceName($, cwd),
-            jj.getBookmarkForChange($, '@', cwd),
-          ])
-
-          const gateUnlocked = isRepo && (description.length > 0 || hasModifications)
-
-          const lines = [
-            '## JJ Status',
-            '',
-            `| Field | Value |`,
-            `|-------|-------|`,
-            `| Gate | ${gateUnlocked ? 'UNLOCKED' : 'LOCKED'} |`,
-            `| JJ Repo | ${isRepo ? 'Yes' : 'No'} |`,
-            `| Workspace | ${workspaceName} |`,
-            `| Bookmark | ${bookmark || '(none)'} |`,
-            `| Change ID | \`${changeId || 'none'}\` |`,
-            `| Description | ${description || '(empty)'} |`,
-            '',
-            '### Working Copy Status',
-            '```',
-            status || '(no changes)',
-            '```',
-            '',
-            '### Diff Summary',
-            '```',
-            diffSummary || '(no diff)',
-            '```',
-          ]
-
-          return lines.join('\n')
-        },
-      }),
-
-      jj_push: tool({
-        description: "Push changes to remote. When called without confirm:true, returns a detailed preview (description, file list, diff summary) that you MUST display to the user. Never summarize - show the full preview. Only call with confirm:true after explicit user approval.",
-        args: {
-          bookmark: tool.schema.string().optional().describe("Bookmark name to push (defaults to 'main')"),
-          confirm: tool.schema.boolean().optional().describe("Set to true ONLY after receiving explicit user permission to push"),
-        },
-        async execute(args, context) {
-          const state = getState(context.sessionID)
-          const cwd = state?.workspacePath || undefined
-          const [currentDesc, hasModifications, actualWorkspace, actualWorkspacePath, diffFiles] = await Promise.all([
-            jj.getCurrentDescription($, cwd),
-            jj.hasUncommittedChanges($, cwd),
-            jj.getWorkspaceName($, cwd),
-            jj.getWorkspaceRoot($, cwd),
-            jj.getDiffFiles($, cwd),
-          ])
-          
-          if (currentDesc.length === 0 && !hasModifications) {
-            return messages.GATE_NOT_UNLOCKED
-          }
-
-          const isNonDefaultWorkspace = actualWorkspace !== 'default' && actualWorkspace !== ''
-          
-          if (diffFiles.length === 0) {
-            if (isNonDefaultWorkspace) {
-              if (!args.confirm) {
-                return messages.WORKSPACE_EMPTY_CHANGES(actualWorkspace)
-              }
-              const repoRoot = actualWorkspacePath.replace(/\/.workspaces\/[^/]+$/, '')
-              await jj.workspaceForget($, actualWorkspace, repoRoot)
-              try { await $`rm -rf ${actualWorkspacePath}` } catch {}
-              await jj.gitFetch($, repoRoot)
-              await jj.newFromDefaultBranch($, repoRoot)
-              setState(context.sessionID, {
-                gateUnlocked: false,
-                changeId: null,
-                changeDescription: '',
-                modifiedFiles: [],
-                bookmark: null,
-                workspace: 'default',
-                workspacePath: repoRoot,
-              })
-              return messages.WORKSPACE_CLEANUP_ONLY(actualWorkspace)
-            }
-            return messages.PUSH_NO_CHANGES
-          }
-
-          const diffSummary = await jj.getDiffSummary($, cwd)
-
-          if (!args.confirm) {
-            let confirmMsg = messages.PUSH_CONFIRMATION(currentDesc, diffFiles, diffSummary)
-            if (isNonDefaultWorkspace) {
-              confirmMsg += `\n\n**Workspace cleanup**: After push, \`${actualWorkspace}\` will be removed and you'll return to the main project directory.`
-            }
-            return confirmMsg
-          }
-
-          let warning = ''
-          if (currentDesc.length < 10) {
-            warning = messages.PUSH_DESCRIPTION_WARNING(currentDesc, diffFiles) + '\n\n'
-          }
-
-          const defaultBranch = await jj.getDefaultBranch($, cwd)
-          const bookmark = args.bookmark || defaultBranch
-          const bookmarkResult = await jj.bookmarkMove($, bookmark, cwd)
-          if (!bookmarkResult.success) {
-            return `Error moving bookmark '${bookmark}': ${bookmarkResult.error}`
-          }
-
-          const pushResult = await jj.gitPush($, bookmark, cwd)
-          if (!pushResult.success) {
-            return `Error pushing: ${pushResult.error}`
-          }
-
-          if (isNonDefaultWorkspace) {
-            const repoRoot = actualWorkspacePath.replace(/\/.workspaces\/[^/]+$/, '')
-            await jj.workspaceForget($, actualWorkspace, repoRoot)
-            try { await $`rm -rf ${actualWorkspacePath}` } catch {}
-            await jj.gitFetch($, repoRoot)
-            await jj.newFromDefaultBranch($, repoRoot)
-            setState(context.sessionID, {
-              gateUnlocked: false,
-              changeId: null,
-              changeDescription: '',
-              modifiedFiles: [],
-              bookmark: null,
-              workspace: 'default',
-              workspacePath: repoRoot,
-            })
-            const cleanup = await silentCleanup($, repoRoot)
-            let result = warning + messages.PUSH_SUCCESS_WITH_CLEANUP(bookmark, actualWorkspace)
-            if (cleanup.activeWorkspaces.length > 0) {
-              result += `\n\n**Other workspaces**: ${cleanup.activeWorkspaces.map(w => `\`${w}\``).join(', ')} (use \`jj_cleanup()\` to remove if no longer needed)`
-            }
-            return result
-          }
-
-          setState(context.sessionID, {
-            gateUnlocked: false,
-            changeId: null,
-            changeDescription: '',
-            modifiedFiles: [],
-            bookmark: null,
-          })
-          const cleanup = await silentCleanup($)
-          let result = warning + messages.PUSH_SUCCESS(currentDesc, bookmark)
-          if (cleanup.activeWorkspaces.length > 0) {
-            result += `\n\n**Other workspaces**: ${cleanup.activeWorkspaces.map(w => `\`${w}\``).join(', ')} (use \`jj_cleanup()\` to remove if no longer needed)`
-          }
-          return result
-        },
-      }),
-
-      jj_git_init: tool({
-        description: "Initialize JJ in this directory. Only available if not already a JJ repo.",
-        args: {},
-        async execute(args, context) {
-          const isRepo = await jj.isJJRepo($)
-          if (isRepo) {
-            return "This directory is already a JJ repository. Use `jj()` to create a new change."
-          }
-
-          const result = await jj.gitInit($)
-          if (!result.success) {
-            return `Error initializing JJ: ${result.error}`
-          }
-
-          return messages.JJ_GIT_INIT_SUCCESS
-        },
-      }),
-
-      jj_undo: tool({
-        description: "Undo the last JJ operation. Safe recovery from mistakes.",
-        args: {},
-        async execute(args, context) {
-          const state = getState(context.sessionID)
-          const cwd = state?.workspacePath || undefined
-          const result = await jj.undo($, cwd)
-          if (!result.success) {
-            return `Error: ${result.error}`
-          }
-          return "Undo successful. Last operation has been reverted."
-        },
-      }),
-
-      jj_describe: tool({
-        description: "Update the description of the current JJ change.",
-        args: {
-          message: tool.schema.string().describe("New description for the current change"),
-        },
-        async execute(args, context) {
-          const validation = validateDescription(args.message)
-          if (!validation.valid) {
-            return validation.message!
-          }
-
-          const state = getState(context.sessionID)
-          const cwd = state?.workspacePath || undefined
-          const result = await jj.describe($, args.message, cwd)
-          if (!result.success) {
-            return `Error: ${result.error}`
-          }
-
-          return `Description updated to: "${args.message}"`
-        },
-      }),
-
-      jj_abandon: tool({
-        description: "Abandon the current JJ change and reset the gate. Use to start over.",
-        args: {},
-        async execute(args, context) {
-          const state = getState(context.sessionID)
-          const cwd = state?.workspacePath || undefined
-          const currentDesc = await jj.getCurrentDescription($, cwd)
-          const hasModifications = await jj.hasUncommittedChanges($, cwd)
-          
-          if (currentDesc.length === 0 && !hasModifications) {
-            return "No active change to abandon."
-          }
-
-          const result = await jj.abandon($, cwd)
-          if (!result.success) {
-            return `Error: ${result.error}`
-          }
-
-          const workspaceName = await jj.getWorkspaceName($, cwd)
-          const workspacePath = await jj.getWorkspaceRoot($, cwd)
-          const isNonDefaultWorkspace = workspaceName !== 'default' && workspaceName !== ''
-
-          if (isNonDefaultWorkspace) {
-            const repoRoot = workspacePath.replace(/\/.workspaces\/[^/]+$/, '')
-            await jj.workspaceForget($, workspaceName, repoRoot)
-            if (workspacePath) {
-              try { await $`rm -rf ${workspacePath}` } catch {}
-            }
-            await jj.gitFetch($, repoRoot)
-            await jj.newFromDefaultBranch($, repoRoot)
-            setState(context.sessionID, {
-              gateUnlocked: false,
-              changeId: null,
-              changeDescription: '',
-              modifiedFiles: [],
-              bookmark: null,
-              workspace: 'default',
-              workspacePath: repoRoot,
-            })
-            return `Change abandoned and workspace \`${workspaceName}\` cleaned up. Gate is now locked. Call \`jj()\` to start a new change.`
-          }
-
-          return "Change abandoned. Gate is now locked. Call `jj()` to start a new change."
-        },
-      }),
-
-      jj_workspace: tool({
-        description: "Create a new JJ workspace for parallel development. Creates workspace in .workspaces/ subdirectory with isolated working copy.",
-        args: {
-          description: tool.schema.string().describe("Description of the work for this workspace"),
-        },
-        async execute(args, context) {
-          const validation = validateDescription(args.description)
-          if (!validation.valid) {
-            return validation.message!
-          }
-
-          const state = getState(context.sessionID)
-          const cwd = state?.workspacePath || undefined
-          const fetchResult = await jj.gitFetch($, cwd)
-          let warning = ''
-          if (!fetchResult.success) {
-            warning = `Note: git fetch skipped (${fetchResult.error})\n\n`
-          }
-
-          const currentRoot = await jj.getWorkspaceRoot($, cwd)
-          const location = jj.detectWorkspaceLocation(currentRoot)
-          const actualRepoRoot = location.repoRoot
-          
-          const workspaceSlug = slugify(args.description)
-          const workspaceName = workspaceSlug
-          const workspacesDir = `${actualRepoRoot}/.workspaces`
-          const workspacePath = `${workspacesDir}/${workspaceSlug}`
-
           try {
-            await $`mkdir -p ${workspacesDir}`
+            await $`jj new main -m ${desc} 2>/dev/null`
+          } catch (e: any) {
+            return `Error creating change: ${e.message}\n\nTry: \`jj new -m "${desc}"\` manually.`
+          }
+        }
+
+        const changeId = await $`jj log -r @ --no-graph -T 'change_id.short()' 2>/dev/null`.text()
+        sessions.set(sessionID, { unlocked: true })
+
+        return `Change \`${changeId.trim()}\` created: "${desc}"\n\nYou may now edit files.`
+      },
+    }),
+
+    jj_push: tool({
+      description: "Push changes to remote. Shows preview first, requires user confirmation.",
+      args: {
+        confirm: tool.schema.boolean().optional().describe("Set true ONLY after user explicitly approves"),
+      },
+      async execute({ confirm }, { sessionID }) {
+        const [desc, diffStat] = await Promise.all([
+          getDescription($),
+          $`jj diff --stat 2>/dev/null`.text().catch(() => ''),
+        ])
+
+        if (!desc && !diffStat.trim()) {
+          return `Nothing to push. Create a change with \`jj("description")\` first.`
+        }
+
+        if (!confirm) {
+          const files = await $`jj diff --name-only 2>/dev/null`.text().catch(() => '')
+          return [
+            `**Ready to push:**\n`,
+            `**Description:** ${desc || '(none)'}`,
+            `\n**Files:**\n\`\`\`\n${files.trim() || '(no changes)'}\n\`\`\``,
+            `\n**Diff:**\n\`\`\`\n${diffStat.trim() || '(no diff)'}\n\`\`\``,
+            `\n---\n**Confirm push?** Call \`jj_push(confirm: true)\` after user approval.`
+          ].join('\n')
+        }
+
+        // Move bookmark and push
+        try {
+          await $`jj bookmark move main --to @ 2>/dev/null`
+        } catch {
+          try {
+            await $`jj bookmark create main -r @ 2>/dev/null`
           } catch {}
+        }
 
-          const defaultRevset = await jj.getDefaultBranchRevset($, actualRepoRoot)
-          const addResult = await jj.workspaceAdd($, workspacePath, workspaceName, defaultRevset, actualRepoRoot)
-          if (!addResult.success) {
-            return `Error creating workspace: ${addResult.error}`
-          }
+        try {
+          await $`jj git push -b main 2>/dev/null`
+        } catch (e: any) {
+          return `Push failed: ${e.message}\n\nTry \`jj git push -b main\` manually.`
+        }
 
-          if (location.isInsideWorkspace) {
-            return warning + messages.WORKSPACE_SIBLING_CREATED(workspaceName, workspacePath, args.description, location.currentWorkspaceSlug!)
-          }
-          return warning + messages.WORKSPACE_CREATED(workspaceName, workspacePath, args.description)
-        },
-      }),
+        // Lock gate for next task
+        sessions.set(sessionID, { unlocked: false })
 
-      jj_workspaces: tool({
-        description: "List all JJ workspaces with their status and changes.",
-        args: {},
-        async execute(args, context) {
-          const state = getState(context.sessionID)
-          const cwd = state?.workspacePath || undefined
-          const listOutput = await jj.workspaceList($, cwd)
-          if (!listOutput) {
-            return "No workspaces found."
-          }
+        // Create fresh change for next task
+        try { await $`jj new main@origin 2>/dev/null` } catch {}
 
-          const lines = listOutput.split('\n')
-          const rows: string[] = []
-          
-          for (const line of lines) {
-            const match = line.match(/^(\S+):\s+(\S+)\s+(.*)$/)
-            if (match) {
-              const [, name, changeId, rest] = match
-              const isActive = rest.includes('@') ? ' **(active)**' : ''
-              const description = rest.replace(/@?\s*/, '').trim()
-              rows.push(`| ${name}${isActive} | - | \`${changeId}\` | ${description || '(empty)'} |`)
-            }
-          }
+        return `Pushed to main. Gate locked for next task.\n\nCall \`jj("description")\` to start new work.`
+      },
+    }),
 
-          if (rows.length === 0) {
-            return "No workspaces found."
-          }
+    jj_status: tool({
+      description: "Show current JJ status and gate state",
+      args: {},
+      async execute(_, { sessionID }) {
+        const state = sessions.get(sessionID)
+        const [desc, diffStat, status] = await Promise.all([
+          getDescription($),
+          $`jj diff --stat 2>/dev/null`.text().catch(() => ''),
+          $`jj st 2>/dev/null`.text().catch(() => ''),
+        ])
 
-          return messages.WORKSPACE_LIST_HEADER + '\n' + rows.join('\n')
-        },
-      }),
-
-      jj_cleanup: tool({
-        description: "Clean up empty commits and stale workspaces. Shows preview first, then requires confirm:true to execute.",
-        args: {
-          confirm: tool.schema.boolean().optional().describe("Set to true to execute cleanup after reviewing preview"),
-        },
-        async execute(args, context) {
-          const state = getState(context.sessionID)
-          const cwd = state?.workspacePath || undefined
-          const emptyCommits = await jj.getEmptyCommits($, cwd)
-          const staleWorkspaces = await jj.getStaleWorkspaces($, cwd)
-
-          if (emptyCommits.length === 0 && staleWorkspaces.length === 0) {
-            return messages.CLEANUP_NOTHING_TO_DO
-          }
-
-          if (!args.confirm) {
-            return messages.CLEANUP_PREVIEW({ emptyCommits, staleWorkspaces })
-          }
-
-          let totalAbandoned = 0
-          let allDeletedBookmarks: string[] = []
-
-          if (emptyCommits.length > 0) {
-            const changeIds = emptyCommits.map(c => c.changeId)
-            const result = await jj.abandonCommits($, changeIds, cwd)
-            if (result.success) {
-              totalAbandoned = result.abandoned
-              allDeletedBookmarks = result.deletedBookmarks
-            }
-          }
-
-          let workspacesRemoved = 0
-          for (const workspace of staleWorkspaces) {
-            const result = await jj.workspaceForget($, workspace.name, cwd)
-            if (result.success) {
-              workspacesRemoved++
-            }
-          }
-
-          return messages.CLEANUP_SUCCESS(totalAbandoned, workspacesRemoved, allDeletedBookmarks)
-        },
-      }),
-    },
-  }
-}
+        return [
+          `**Gate:** ${state?.unlocked ? 'UNLOCKED' : 'LOCKED'}`,
+          `**Description:** ${desc || '(none)'}`,
+          `\n**Status:**\n\`\`\`\n${status.trim() || '(clean)'}\n\`\`\``,
+          `\n**Diff:**\n\`\`\`\n${diffStat.trim() || '(no changes)'}\n\`\`\``,
+        ].join('\n')
+      },
+    }),
+  },
+})
 
 export default plugin
