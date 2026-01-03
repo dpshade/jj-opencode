@@ -34,9 +34,9 @@ const plugin: Plugin = async ({ $ }) => ({
     if (description.length > 0) return
 
     throw new Error(
-      `Create a checkpoint before editing:\n\n` +
-      `    jj new -m "what you're about to do"\n\n` +
-      `This ensures every change is tracked and can be undone with \`jj undo\`.`
+      `Describe your intent before editing:\n\n` +
+      `    jj describe -m "what you're about to do"\n\n` +
+      `When done, run \`jj new\` to commit and start fresh.`
     )
   },
 })

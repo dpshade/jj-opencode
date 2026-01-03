@@ -2,29 +2,31 @@
 
 <div align="center">
 
-**Checkpoint before you edit. Undo anything.**
+**Describe intent. Edit. Commit. Repeat.**
 
 [![npm version](https://img.shields.io/npm/v/jj-opencode.svg?color=cb3837&labelColor=black&style=flat-square)](https://www.npmjs.com/package/jj-opencode)
 [![License: MIT](https://img.shields.io/badge/License-MIT-white?labelColor=black&style=flat-square)](https://opensource.org/licenses/MIT)
 
 </div>
 
-An [OpenCode](https://github.com/opencode-ai/opencode) plugin that forces a checkpoint before every edit.
+An [OpenCode](https://github.com/opencode-ai/opencode) plugin that blocks edits until you declare intent.
 
 ## How It Works
 
 ```
-AI: jj new -m "Add validation"   ← checkpoint
-AI: [edits files]                ← all edits in this commit
+AI: jj describe -m "Add validation"  ← declare intent, unlocks
+AI: [edits files]                    ← all edits in this commit
+AI: jj new                           ← commit, locks again
 
-AI: jj new -m "Add tests"        ← new checkpoint  
-AI: [edits files]                ← all edits in this commit
+AI: jj describe -m "Add tests"       ← declare intent, unlocks
+AI: [edits files]
+AI: jj new                           ← commit, locks again
 
 User: "undo that"
-AI: jj undo                      ← reverts entire "Add tests" checkpoint
+AI: jj undo                          ← reverts last commit
 ```
 
-40 lines of code. Zero tools. Just: checkpoint before edit.
+`jj new` at the end guarantees separation — can't accidentally mix work.
 
 ## Installation
 
@@ -43,7 +45,8 @@ Add to `~/.config/opencode/config.json`:
 
 | Task | Command |
 |------|---------|
-| Checkpoint | `jj new -m "what you're doing"` |
+| Start work | `jj describe -m "what you're doing"` |
+| Finish work | `jj new` |
 | Undo | `jj undo` |
 | Status | `jj st` |
 | History | `jj log` |
@@ -51,8 +54,8 @@ Add to `~/.config/opencode/config.json`:
 
 ## Why?
 
-- **Never lose work** — every edit is checkpointed
-- **Easy undo** — `jj undo` reverts one logical unit
+- **Guaranteed separation** — `jj new` re-engages the gate
+- **Never lose work** — every edit is in a described commit
 - **Clear history** — every commit has meaning
 
 ## License

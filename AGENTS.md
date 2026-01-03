@@ -1,29 +1,30 @@
 ---
 name: jj-opencode
-description: "JJ VCS integration - checkpoint before every edit"
+description: "JJ VCS integration - describe intent before every edit"
 alwaysApply: true
 ---
 
 # jj-opencode
 
-Blocks edits until you create a checkpoint. Every logical unit of work gets its own commit.
+Blocks edits until you describe your intent. Every logical unit of work gets its own commit.
 
 ## Workflow
 
 ```
-jj new -m "Add input validation"    ← checkpoint created
-[edit files]                         ← edits go to this commit
-jj new -m "Add tests for validation" ← new checkpoint
-[edit files]                         ← edits go to this commit
-jj new -m "Fix edge case"            ← new checkpoint
+jj describe -m "Add input validation"  ← declare intent, unlocks editing
+[edit files]                           ← edits go to this commit
+jj new                                 ← finish work, locks editing
+
+jj describe -m "Add tests"             ← declare next intent, unlocks
 [edit files]
+jj new                                 ← finish work, locks editing
 ```
 
-**If something goes wrong:** `jj undo` reverts the last checkpoint entirely.
+**If something goes wrong:** `jj undo` reverts the last operation.
 
 ## What's Blocked
 
-Until `jj new -m "description"` is run:
+Until `jj describe -m "description"` is run:
 - `write`, `edit`
 - `lsp_rename`, `lsp_code_action_resolve`
 - `ast_grep_replace`
@@ -32,18 +33,18 @@ Until `jj new -m "description"` is run:
 
 | Task | Command |
 |------|---------|
-| Create checkpoint | `jj new -m "what you're about to do"` |
+| Start work | `jj describe -m "what you're about to do"` |
+| Finish work | `jj new` |
 | Check status | `jj st` |
 | View history | `jj log` |
-| Undo last checkpoint | `jj undo` |
-| Update description | `jj describe -m "better description"` |
+| Undo | `jj undo` |
 | Abandon current work | `jj abandon @` |
 | Push to remote | `jj bookmark move main --to @ --allow-backwards && jj git push -b main` |
 
-## Why Checkpoints?
+## Why This Workflow?
 
-1. **Never lose work** — every edit is in a described commit
-2. **Easy undo** — `jj undo` reverts exactly one logical unit
+1. **Guaranteed separation** — `jj new` re-engages the gate, can't forget
+2. **Never lose work** — every edit is in a described commit
 3. **Clear history** — `jj log` shows what happened step by step
 4. **No WIP commits** — every commit has meaning
 
