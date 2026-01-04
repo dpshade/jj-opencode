@@ -73,7 +73,48 @@ If a subagent tries to edit without a description, it will be blocked and instru
 3. **Clear history** — `jj log` shows what happened step by step
 4. **No WIP commits** — every commit has meaning
 
-## Don't Use Git
+## JJ ≠ Git (CRITICAL)
+
+### The #1 Mistake: Sequential Pushing
+
+**Git thinking (WRONG):**
+```
+Push parent commit → Push child commit → Push next...
+```
+
+**JJ thinking (CORRECT):**
+```
+Move bookmark to tip → Push once (all ancestors included automatically)
+```
+
+### What Actually Happens
+
+```
+@ (commit C - docs)
+│
+◉ (commit B - feature)  
+│
+◆ main@origin (commit A)
+
+WRONG: Push B first, then push C  ← Creates immutability issues
+RIGHT: Point main at C, push once ← B and C both pushed
+```
+
+### Why This Matters
+
+1. **Ancestors are automatic** — pushing a bookmark pushes ALL commits between `bookmark@origin` and the new target
+2. **Commits become immutable after push** — you can't squash/rewrite them
+3. **No sequential pushing needed** — one push, all commits
+
+### Anti-Patterns
+
+| Don't | Do Instead |
+|-------|------------|
+| Push commits one at a time | Push bookmark once (includes all ancestors) |
+| Squash after pushing | Squash BEFORE pushing (commits are immutable after) |
+| Think "I need to push each commit" | Think "move bookmark to tip, push bookmark" |
+
+### Command Mapping
 
 | Git | JJ |
 |-----|-----|

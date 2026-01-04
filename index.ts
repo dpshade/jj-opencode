@@ -47,6 +47,51 @@ async function getChangeInfo($: any): Promise<{ id: string; description: string;
   }
 }
 
+async function getCommitStack($: any, bookmark: string): Promise<string[]> {
+  try {
+    // Get all commits between remote bookmark and current working copy parent
+    const output = (await $`jj log -r '${bookmark}@origin..@-' --no-graph -T 'change_id.shortest(8) ++ " " ++ description.first_line() ++ "\n"'`.text()).trim()
+    return output ? output.split('\n').filter(Boolean) : []
+  } catch {
+    return []
+  }
+}
+
+async function isImmutable($: any, revset: string = '@'): Promise<boolean> {
+  try {
+    const result = (await $`jj log -r '${revset}' --no-graph -T 'if(immutable, "true", "false")'`.text()).trim()
+    return result === 'true'
+  } catch {
+    return false
+  }
+}
+
+const JJ_ERROR_PATTERNS: Array<{ pattern: RegExp; message: (match: RegExpMatchArray) => string }> = [
+  {
+    pattern: /Commit (\S+) is immutable/i,
+    message: (m) => `Cannot modify commit ${m[1]} - it's immutable (already pushed).
+
+Recovery options:
+• Continue with new work: jj describe -m "next task"
+• Start fresh from main: jj new main@origin -m "description"
+• Undo recent operation: jj undo`
+  },
+  {
+    pattern: /working copy is stale/i,
+    message: () => `Working copy is stale.
+
+Recovery: jj workspace update-stale`
+  },
+]
+
+function parseJjError(stderr: string): string | null {
+  for (const { pattern, message } of JJ_ERROR_PATTERNS) {
+    const match = stderr.match(pattern)
+    if (match) return message(match)
+  }
+  return null
+}
+
 const plugin: Plugin = async ({ $, client }) => ({
   name: 'jj-opencode',
 
@@ -79,16 +124,55 @@ BEFORE calling: Show preview with 'jj log -r @' and 'jj diff --stat', ask user t
           return "Cannot push: no file changes."
         }
 
+        const commitStack = await getCommitStack($, bookmark)
+        const totalCommits = commitStack.length + 1
+
         if (!args.confirmed) {
-          return "Show preview first with 'jj log -r @' and 'jj diff --stat', then call with confirmed: true"
+          let preview = `## Push Preview\n\n`
+          preview += `**${totalCommits} commit(s) will be pushed to \`${bookmark}\`:**\n\n`
+          
+          if (commitStack.length > 0) {
+            preview += `\`\`\`\n`
+            for (const commit of commitStack) {
+              preview += `${commit}\n`
+            }
+            preview += `${info.id} ${info.description.split('\n')[0]}\n`
+            preview += `\`\`\`\n\n`
+          } else {
+            preview += `\`\`\`\n${info.id} ${info.description.split('\n')[0]}\n\`\`\`\n\n`
+          }
+          
+          preview += `**Files changed:**\n\`\`\`\n${info.stats}\n\`\`\`\n\n`
+          preview += `After pushing, these commits become **immutable** (can't rewrite them).\n\n`
+          preview += `Call with \`confirmed: true\` to push.`
+          
+          return preview
+        }
+
+        if (await isImmutable($, '@')) {
+          return `Current commit is already immutable (pushed). Start new work: jj describe -m "description"`
         }
 
         try {
           await $`jj new`.text()
           await $`jj bookmark set ${bookmark} -r @-`.text()
           await $`jj git push -b ${bookmark}`.text()
-          return `Pushed ${info.id} to ${bookmark}`
+          
+          let result = `Pushed ${totalCommits} commit(s) to \`${bookmark}\`:\n\n`
+          if (commitStack.length > 0) {
+            for (const commit of commitStack) {
+              result += `• ${commit}\n`
+            }
+          }
+          result += `• ${info.id} ${info.description.split('\n')[0]}\n\n`
+          result += `These commits are now **immutable**. Working copy is clean.`
+          
+          return result
         } catch (error: any) {
+          const recoveryMessage = parseJjError(error.message)
+          if (recoveryMessage) {
+            return recoveryMessage
+          }
           return `Push failed: ${error.message}`
         }
       },

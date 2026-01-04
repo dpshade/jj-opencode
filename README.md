@@ -70,6 +70,19 @@ jj_push bookmark="feature"   ← push to specific branch
 
 Only specify `bookmark` if user explicitly requested it.
 
+**Multi-commit push:** The tool shows all commits that will be pushed. JJ pushes bookmarks, not individual commits — moving the bookmark to the tip pushes all ancestors automatically.
+
+## JJ ≠ Git
+
+JJ uses bookmarks, not branches. Key difference for pushing:
+
+| Git Model | JJ Model |
+|-----------|----------|
+| Push commits one by one | Move bookmark to tip, push once |
+| Can rewrite after push (with force) | Commits are **immutable** after push |
+
+**Anti-pattern:** Don't try to push commits sequentially or squash after pushing.
+
 ## Subagents
 
 Subagents that hit the edit gate are blocked and told to return to the parent agent. JJ workflow (describe/new/push) should only be managed by the primary agent.
