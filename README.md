@@ -16,17 +16,17 @@ An [OpenCode](https://github.com/opencode-ai/opencode) plugin that blocks edits 
 ```
 AI: jj describe -m "Add validation"  ← declare intent, unlocks
 AI: [edits files]                    ← all edits in this commit
-AI: jj new                           ← commit, locks again
+[session ends]                       ← auto-commits, locks again
 
 AI: jj describe -m "Add tests"       ← declare intent, unlocks
 AI: [edits files]
-AI: jj new                           ← commit, locks again
+[session ends]                       ← auto-commits, locks again
 
 User: "undo that"
 AI: jj undo                          ← reverts last commit
 ```
 
-`jj new` at the end guarantees separation — can't accidentally mix work.
+`jj new` runs automatically when the session goes idle — can't accidentally mix work.
 
 ## Installation
 
@@ -46,7 +46,7 @@ Add to `~/.config/opencode/config.json`:
 | Task | Command |
 |------|---------|
 | Start work | `jj describe -m "what you're doing"` |
-| Finish work | `jj new` |
+| Finish work | *(automatic)* |
 | Undo | `jj undo` |
 | Status | `jj st` |
 | History | `jj log` |
@@ -76,7 +76,7 @@ Subagents that hit the edit gate are blocked and told to return to the parent ag
 
 ## Why?
 
-- **Guaranteed separation** — `jj new` re-engages the gate
+- **Guaranteed separation** — `jj new` runs automatically on session idle
 - **Never lose work** — every edit is in a described commit
 - **Clear history** — every commit has meaning
 

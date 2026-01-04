@@ -13,12 +13,14 @@ Blocks edits until you describe your intent. Every logical unit of work gets its
 ```
 jj describe -m "Add input validation"  ← declare intent, unlocks editing
 [edit files]                           ← edits go to this commit
-jj new                                 ← finish work, locks editing
+[session ends]                         ← auto-commits, locks editing
 
 jj describe -m "Add tests"             ← declare next intent, unlocks
 [edit files]
-jj new                                 ← finish work, locks editing
+[session ends]                         ← auto-commits, locks editing
 ```
+
+`jj new` runs automatically when the session goes idle. No manual commit needed.
 
 **If something goes wrong:** `jj undo` reverts the last operation.
 
@@ -34,7 +36,7 @@ Until `jj describe -m "description"` is run:
 | Task | Command |
 |------|---------|
 | Start work | `jj describe -m "what you're about to do"` |
-| Finish work | `jj new` |
+| Finish work | *(automatic on session idle)* |
 | Check status | `jj st` |
 | View history | `jj log` |
 | Undo | `jj undo` |
@@ -66,7 +68,7 @@ If a subagent tries to edit without a description, it will be blocked and instru
 
 ## Why This Workflow?
 
-1. **Guaranteed separation** — `jj new` re-engages the gate, can't forget
+1. **Guaranteed separation** — `jj new` runs automatically, re-engaging the gate
 2. **Never lose work** — every edit is in a described commit
 3. **Clear history** — `jj log` shows what happened step by step
 4. **No WIP commits** — every commit has meaning
