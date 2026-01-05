@@ -77,6 +77,83 @@ If a subagent tries to edit without a description, it will be blocked and instru
 3. **Clear history** — `jj log` shows what happened step by step
 4. **No WIP commits** — every commit has meaning
 
+## Automatic Chaining (Session Idle Behavior)
+
+When session goes idle, the plugin auto-detects whether to chain or branch:
+
+| Parent (@-) State | Action | Result |
+|-------------------|--------|--------|
+| Has changes | `jj new @-` | Child of last work (linear chain) |
+| Empty | `jj new` | Sibling from main |
+
+**Linear chain (default when continuing work):**
+```
+main@origin
+│
+◉ "Add validation"
+│
+◉ "Add tests"     ← child of previous
+│
+@ (current)
+```
+
+**Siblings (when @- was empty or starting fresh):**
+```
+main@origin
+├── ◉ "Add validation"     (message 1)
+├── ◉ "Add tests"          (message 2)  ← siblings
+└── @ (current)
+```
+
+If you have siblings that represent one logical unit of work, **squash before pushing**.
+
+### Recognizing the Pattern
+
+Run `jj log` before push. If you see siblings from same parent that represent one logical unit of work:
+
+```
+@  (empty)
+│
+│ ◉  "Fix typo in validation"
+├─╯
+│ ◉  "Add tests for validation"
+├─╯
+│ ◉  "Add input validation"
+├─╯
+◆  main@origin
+```
+
+These three commits are related work — offer to squash.
+
+### Squashing Siblings
+
+```bash
+# Create merge commit from siblings
+jj new sibling1 sibling2 sibling3 -m "Add input validation with tests"
+
+# Squash the merge into single commit (now a child of main)
+jj squash
+```
+
+Result:
+```
+@  (empty)
+│
+◉  "Add input validation with tests"   ← combined work
+│
+◆  main@origin
+```
+
+### When to Offer Squash
+
+| See This | Do This |
+|----------|---------|
+| Multiple siblings, related work | **Offer squash** before push |
+| Multiple siblings, unrelated work | Push as-is (or separate bookmarks) |
+| Linear chain (parent→child→...) | Push as-is |
+
+**Prompt**: "I see N related commits. Want me to squash them into one before pushing?"
+
 ## JJ ≠ Git (CRITICAL)
 
 ### The #1 Mistake: Sequential Pushing
