@@ -289,19 +289,7 @@ Only specify 'bookmark' if user explicitly requested a specific branch.`,
       if (!description) return
 
       try {
-        // Check if @- has actual changes (non-empty parent)
-        // If so, create child of @- to continue the chain
-        // Otherwise, create sibling from main (default behavior)
-        const parentStats = (await $`jj diff -r @- --stat`.text()).trim()
-        const parentHasChanges = parentStats && !parentStats.includes("0 files changed")
-        
-        if (parentHasChanges) {
-          // Continue from last work - creates linear chain
-          await $`jj new @-`.quiet()
-        } else {
-          // Start fresh from main - creates sibling
-          await $`jj new`.quiet()
-        }
+        await $`jj new`.quiet()
         sessionState.set(sessionID, { gateOpened: false })
       } catch {
         // Silent fail - user will see uncommitted work next session
